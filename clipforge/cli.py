@@ -42,10 +42,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Whisper model size (default: base).",
     )
     parser.add_argument(
+        "--provider",
+        type=str,
+        default="ollama",
+        choices=["ollama", "anthropic"],
+        dest="llm_provider",
+        help="LLM provider for topic segmentation (default: ollama).",
+    )
+    parser.add_argument(
         "--ollama-model",
         type=str,
         default="llama3.1:8b",
         help="Ollama model for topic segmentation (default: llama3.1:8b).",
+    )
+    parser.add_argument(
+        "--anthropic-model",
+        type=str,
+        default="claude-sonnet-4-5-20250929",
+        help="Anthropic model for topic segmentation (default: claude-sonnet-4-5-20250929).",
     )
     parser.add_argument(
         "--min-clip",
@@ -116,7 +130,9 @@ def build_config(args: argparse.Namespace) -> PipelineConfig:
         input_video=args.input_video,
         output_dir=output_dir,
         whisper_model=args.whisper_model,
+        llm_provider=args.llm_provider,
         ollama_model=args.ollama_model,
+        anthropic_model=args.anthropic_model,
         min_clip_duration=args.min_clip_duration,
         max_clip_duration=args.max_clip_duration,
         language=args.language,

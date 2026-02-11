@@ -10,6 +10,7 @@ def test_parse_args_minimal(tmp_video):
     assert args.input_video == tmp_video
     assert args.output_dir is None
     assert args.whisper_model == "base"
+    assert args.llm_provider == "ollama"
 
 
 def test_parse_args_all_flags(tmp_video, tmp_path):
@@ -18,7 +19,9 @@ def test_parse_args_all_flags(tmp_video, tmp_path):
         str(tmp_video),
         "-o", str(out),
         "-w", "large",
+        "--provider", "anthropic",
         "--ollama-model", "mistral:7b",
+        "--anthropic-model", "claude-sonnet-4-5-20250929",
         "--min-clip", "15",
         "--max-clip", "120",
         "--language", "en",
@@ -29,7 +32,9 @@ def test_parse_args_all_flags(tmp_video, tmp_path):
     ])
     assert args.output_dir == out
     assert args.whisper_model == "large"
+    assert args.llm_provider == "anthropic"
     assert args.ollama_model == "mistral:7b"
+    assert args.anthropic_model == "claude-sonnet-4-5-20250929"
     assert args.min_clip_duration == 15
     assert args.max_clip_duration == 120
     assert args.language == "en"

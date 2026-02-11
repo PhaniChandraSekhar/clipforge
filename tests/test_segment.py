@@ -1,4 +1,5 @@
 """Tests for clipforge.segment."""
+import sys
 from unittest.mock import patch, MagicMock
 
 import pytest
@@ -66,43 +67,89 @@ def test_merge_segments_empty():
     assert _merge_segments([]) == []
 
 
-def test_segment_topics_success(sample_transcription, pipeline_config):
-    mock_topics = [
-        TopicSegment(
-            title="Intro",
-            description="Opening",
-            start_time=0.0,
-            end_time=35.0,
-            key_quotes=["Hello world."],
-            confidence=0.9,
-        ),
-    ]
-
+def test_segment_topics_ollama_success(sample_transcription, pipeline_config):
     mock_response = MagicMock()
     mock_response.message.content = '{"topics": [{"title": "Intro", "description": "Opening", "start_time": 0.0, "end_time": 35.0, "key_quotes": ["Hello world."], "confidence": 0.9}]}'
 
-    with patch("clipforge.segment.ollama.chat", return_value=mock_response):
+    mock_ollama = MagicMock()
+    mock_ollama.chat.return_value = mock_response
+
+    with patch.dict(sys.modules, {"ollama": mock_ollama}):
         result = segment_topics(sample_transcription, pipeline_config)
         assert len(result.segments) == 1
         assert result.segments[0].title == "Intro"
         assert result.model_used == "llama3.1:8b"
 
 
-def test_segment_topics_retries_on_failure(sample_transcription, pipeline_config):
+def test_segment_topics_ollama_retries(sample_transcription, pipeline_config):
     mock_response = MagicMock()
     mock_response.message.content = '{"topics": [{"title": "Intro", "description": "d", "start_time": 0.0, "end_time": 35.0, "key_quotes": [], "confidence": 0.9}]}'
 
-    with patch("clipforge.segment.ollama.chat") as mock_chat:
-        mock_chat.side_effect = [
-            RuntimeError("connection error"),
-            RuntimeError("timeout"),
-            mock_response,
-        ]
+    mock_ollama = MagicMock()
+    mock_ollama.chat.side_effect = [
+        RuntimeError("connection error"),
+        RuntimeError("timeout"),
+        mock_response,
+    ]
+
+    with patch.dict(sys.modules, {"ollama": mock_ollama}):
         result = segment_topics(sample_transcription, pipeline_config)
         assert len(result.segments) == 1
 
 
-def test_segment_topics_all_retries_fail(sample_transcription, pipeline_config):
-    with patch("clipforge.segment.ollama.chat", side_effect=RuntimeError("fail")):
+def test_segment_topics_ollama_all_retries_fail(sample_transcription, pipeline_config):
+    mock_ollama = MagicMock()
+    mock_ollama.chat.side_effect = RuntimeError("fail")
+
+    with patch.dict(sys.modules, {"ollama": mock_ollama}):
         with pytest.raises(SegmentationError, match="Failed to parse"):
             segment_topics(sample_transcription, pipeline_config)
+
+
+def test_segment_topics_anthropic_success(sample_transcription, pipeline_config):
+    pipeline_config.llm_provider = "anthropic"
+    pipeline_config.anthropic_model = "claude-sonnet-4-5-20250929"
+
+    json_body = '{"topics": [{"title": "Intro", "description": "Opening", "start_time": 0.0, "end_time": 35.0, "key_quotes": ["Hello world."], "confidence": 0.9}]}'
+
+    mock_text_block = MagicMock()
+    mock_text_block.text = json_body
+
+    mock_msg = MagicMock()
+    mock_msg.content = [mock_text_block]
+
+    mock_client = MagicMock()
+    mock_client.return_value.messages.create.return_value = mock_msg
+
+    mock_anthropic = MagicMock()
+    mock_anthropic.Anthropic = mock_client
+
+    with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
+        result = segment_topics(sample_transcription, pipeline_config)
+        assert len(result.segments) == 1
+        assert result.segments[0].title == "Intro"
+        assert result.model_used == "claude-sonnet-4-5-20250929"
+
+
+def test_segment_topics_anthropic_markdown_wrapped(sample_transcription, pipeline_config):
+    pipeline_config.llm_provider = "anthropic"
+    pipeline_config.anthropic_model = "claude-sonnet-4-5-20250929"
+
+    json_body = '```json\n{"topics": [{"title": "Intro", "description": "Opening", "start_time": 0.0, "end_time": 35.0, "key_quotes": ["Hello world."], "confidence": 0.9}]}\n```'
+
+    mock_text_block = MagicMock()
+    mock_text_block.text = json_body
+
+    mock_msg = MagicMock()
+    mock_msg.content = [mock_text_block]
+
+    mock_client = MagicMock()
+    mock_client.return_value.messages.create.return_value = mock_msg
+
+    mock_anthropic = MagicMock()
+    mock_anthropic.Anthropic = mock_client
+
+    with patch.dict(sys.modules, {"anthropic": mock_anthropic}):
+        result = segment_topics(sample_transcription, pipeline_config)
+        assert len(result.segments) == 1
+        assert result.segments[0].title == "Intro"

@@ -1,10 +1,10 @@
-"""Topic segmentation of transcripts using an Ollama-hosted LLM."""
+"""Topic segmentation of transcripts using Ollama or Anthropic LLMs."""
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
-import ollama
 from pydantic import BaseModel
 
 from clipforge.errors import SegmentationError
@@ -168,6 +168,8 @@ def _merge_segments(all_segments: list[TopicSegment]) -> list[TopicSegment]:
 
 def _call_ollama(chunk: str, config: PipelineConfig) -> list[TopicSegment]:
     """Send a transcript chunk to Ollama and parse the structured response."""
+    import ollama
+
     user_message = (
         "Analyze the following transcript and identify distinct topic segments.\n\n"
         f"{chunk}"
@@ -204,6 +206,73 @@ def _call_ollama(chunk: str, config: PipelineConfig) -> list[TopicSegment]:
     raise SegmentationError("Exhausted retries without result")  # pragma: no cover
 
 
+def _call_anthropic(chunk: str, config: PipelineConfig) -> list[TopicSegment]:
+    """Send a transcript chunk to Anthropic Claude and parse the response."""
+    import anthropic
+
+    client = anthropic.Anthropic()
+
+    user_message = (
+        "Analyze the following transcript and identify distinct topic segments.\n\n"
+        "Return ONLY a JSON object with a single key \"topics\" containing the list "
+        "of topic segments. No other text before or after the JSON.\n\n"
+        f"{chunk}"
+    )
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = client.messages.create(
+                model=config.anthropic_model,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": user_message},
+                ],
+                temperature=0.1,
+            )
+
+            raw_text = response.content[0].text.strip()
+
+            # Extract JSON if wrapped in markdown code blocks
+            if raw_text.startswith("```"):
+                lines = raw_text.split("\n")
+                json_lines = []
+                inside = False
+                for line in lines:
+                    if line.startswith("```") and not inside:
+                        inside = True
+                        continue
+                    elif line.startswith("```") and inside:
+                        break
+                    elif inside:
+                        json_lines.append(line)
+                raw_text = "\n".join(json_lines)
+
+            parsed = TopicList.model_validate_json(raw_text)
+            return parsed.topics
+
+        except Exception as exc:
+            logger.warning(
+                "Anthropic parse attempt %d/%d failed: %s",
+                attempt,
+                MAX_RETRIES,
+                exc,
+            )
+            if attempt == MAX_RETRIES:
+                raise SegmentationError(
+                    f"Failed to parse Anthropic response after {MAX_RETRIES} attempts: {exc}"
+                ) from exc
+
+    raise SegmentationError("Exhausted retries without result")  # pragma: no cover
+
+
+def _call_llm(chunk: str, config: PipelineConfig) -> list[TopicSegment]:
+    """Dispatch to the configured LLM provider."""
+    if config.llm_provider == "anthropic":
+        return _call_anthropic(chunk, config)
+    return _call_ollama(chunk, config)
+
+
 def segment_topics(
     transcription: TranscriptionResult,
     config: PipelineConfig,
@@ -221,6 +290,17 @@ def segment_topics(
         SegmentationError: If segmentation fails after retries.
     """
     try:
+        model_name = (
+            config.anthropic_model
+            if config.llm_provider == "anthropic"
+            else config.ollama_model
+        )
+        logger.info(
+            "Using LLM provider '%s' with model '%s'",
+            config.llm_provider,
+            model_name,
+        )
+
         formatted = _format_transcript(transcription)
         logger.info(
             "Transcript formatted: %d characters (~%d tokens)",
@@ -233,7 +313,7 @@ def segment_topics(
         all_segments: list[TopicSegment] = []
         for i, (chunk_text, offset) in enumerate(chunks):
             logger.info("Processing chunk %d/%d (offset=%.1fs)", i + 1, len(chunks), offset)
-            segments = _call_ollama(chunk_text, config)
+            segments = _call_llm(chunk_text, config)
             logger.info("Chunk %d/%d returned %d segments", i + 1, len(chunks), len(segments))
             all_segments.extend(segments)
 
@@ -246,7 +326,7 @@ def segment_topics(
 
         return SegmentationResult(
             segments=all_segments,
-            model_used=config.ollama_model,
+            model_used=model_name,
         )
 
     except SegmentationError:

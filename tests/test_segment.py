@@ -16,9 +16,9 @@ from clipforge.errors import SegmentationError
 
 def test_format_transcript(sample_transcription):
     formatted = _format_transcript(sample_transcription)
-    assert "[00:00]" in formatted
-    assert "[00:30]" in formatted
-    assert "[01:00]" in formatted
+    assert "[0s]" in formatted
+    assert "[30s]" in formatted
+    assert "[60s]" in formatted
     assert "Hello world." in formatted
 
 

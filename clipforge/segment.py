@@ -27,11 +27,18 @@ You are an expert video editor specializing in AI/ML training content. Your task
 is to analyze a timestamped transcript and identify distinct, self-contained topic \
 segments suitable for YouTube Shorts or standalone clips (30 seconds to 10 minutes).
 
+Each line in the transcript is prefixed with the timestamp in TOTAL SECONDS, like:
+  [120s] Some spoken text...
+This means the line starts at 120 seconds into the video.
+
 For each topic segment, provide:
 - title: A catchy, descriptive title that would work as a YouTube video title.
 - description: A concise summary of the topic covered in the segment.
-- start_time: The start time in seconds (float) where the topic begins.
-- end_time: The end time in seconds (float) where the topic ends.
+- start_time: The start time as a float in TOTAL SECONDS from the beginning of \
+the video. Use the [Xs] timestamps shown in the transcript directly. For example, \
+if a topic starts at [360s], set start_time to 360.0.
+- end_time: The end time as a float in TOTAL SECONDS from the beginning of the \
+video. Must be greater than start_time by at least 30 seconds.
 - key_quotes: A list of 1-3 notable verbatim quotes from the segment.
 - confidence: A float between 0 and 1 indicating how confident you are that \
 this is a distinct, self-contained topic.
@@ -42,6 +49,8 @@ Guidelines:
 - Titles should be engaging and descriptive, suitable for social media.
 - Include the most impactful or informative quotes.
 - Segments must not overlap.
+- IMPORTANT: start_time and end_time MUST be in total seconds, matching the [Xs] \
+timestamps in the transcript. Do NOT use minutes or MM:SS notation.
 - Return your answer as a JSON object with a single key "topics" containing the \
 list of topic segments.
 """
@@ -54,12 +63,14 @@ class TopicList(BaseModel):
 
 
 def _format_transcript(transcription: TranscriptionResult) -> str:
-    """Format a transcription into a timestamped string for the LLM."""
+    """Format a transcription into a timestamped string for the LLM.
+
+    Uses total seconds (e.g. ``[360s]``) instead of MM:SS to avoid ambiguity
+    when the LLM returns start_time / end_time values.
+    """
     lines: list[str] = []
     for seg in transcription.segments:
-        minutes = int(seg.start) // 60
-        seconds = int(seg.start) % 60
-        lines.append(f"[{minutes:02d}:{seconds:02d}] {seg.text}")
+        lines.append(f"[{int(seg.start)}s] {seg.text}")
     return "\n".join(lines)
 
 
@@ -85,11 +96,10 @@ def _chunk_transcript(
 
     # Also map line index -> segment start time by parsing the timestamp prefix
     def _parse_line_time(line: str) -> float:
-        """Extract seconds from a '[MM:SS] ...' formatted line."""
+        """Extract seconds from a '[Xs] ...' formatted line."""
         try:
-            ts = line.split("]")[0].lstrip("[")
-            parts = ts.split(":")
-            return int(parts[0]) * 60 + int(parts[1])
+            ts = line.split("]")[0].lstrip("[").rstrip("s")
+            return float(ts)
         except (IndexError, ValueError):
             return 0.0
 

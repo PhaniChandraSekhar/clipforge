@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clipforge"
+version = "0.1.0"
+description = "AIML Training Video to YouTube Shorts Pipeline"
+requires-python = ">=3.10"
+dependencies = [
+    "openai-whisper",
+    "ollama",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+]
+
+[project.scripts]
+clipforge = "clipforge.cli:main"
